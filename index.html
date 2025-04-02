@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音声デシベル測定</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h2>リアルタイム音声デシベル測定</h2>
+    <p id="outputDBRaw">デシベル生値: -- dB</p>
+    <p id="outputDBmovmean">デシベル移動平均値: -- dB</p>
+    <canvas id="dbChart"></canvas>
+    <script>
+        async function startAudioProcessing() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const analyser = audioContext.createAnalyser();
+                const microphone = audioContext.createMediaStreamSource(stream);
+                const scriptProcessor = audioContext.createScriptProcessor(512, 1, 1);
+
+                analyser.fftSize = 1024;
+                microphone.connect(analyser);
+                analyser.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
+
+                let timeData = [];
+                let dbData = [];
+                let dbMovingAvgData = [];
+                let startTime = Date.now();
+                
+                const ctx = document.getElementById('dbChart').getContext('2d');
+                const chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: timeData,
+                        datasets: [
+                            {
+                                label: 'デシベル (dB)',
+                                data: dbData,
+                                borderColor: 'blue',
+                                borderWidth: 1,
+                                pointRadius: 0
+                            },
+                            {
+                                label: '移動平均 (dB)',
+                                data: dbMovingAvgData,
+                                borderColor: 'red',
+                                borderWidth: 1,
+                                pointRadius: 0,
+                                borderDash: [5, 5]
+                            }
+                        ]
+                    },
+                    options: {
+                        scales: {
+                            x: { title: { display: true, text: '時間 (秒)' } },
+                            y: { title: { display: true, text: 'デシベル (dB)' }, min: 0, max: 100 }
+                        }
+                    }
+                });
+
+                scriptProcessor.onaudioprocess = () => {
+                    const buffer = new Uint8Array(analyser.frequencyBinCount);
+                    analyser.getByteFrequencyData(buffer);
+
+                    let sum = 0;
+                    for (let i = 0; i < buffer.length; i++) {
+                        sum += buffer[i] ** 2;
+                    }
+                    let rms = Math.sqrt(sum / buffer.length);
+                    let db = 20 * Math.log10(rms);
+
+                    let elapsedTime = (Date.now() - startTime) / 1000;
+                    if (timeData.length > 500) {
+                        timeData.shift();
+                        dbData.shift();
+                        dbMovingAvgData.shift();
+                    }
+                    timeData.push(elapsedTime.toFixed(1));
+                    dbData.push(db);
+
+                    // デシベル生値を表示
+                    document.getElementById('outputDBRaw').textContent = `デシベル生値: ${db.toFixed(1)} dB`;
+                    
+                    // 移動平均を計算
+                    let dbMovingAvg = dbData.slice(-100).reduce((a, b) => a + b, 0) / Math.min(dbData.length, 100);
+                    dbMovingAvgData.push(dbMovingAvg);
+                    document.getElementById('outputDBmovmean').textContent = `デシベル移動平均値: ${dbMovingAvg.toFixed(1)} dB`;
+                    
+                    chart.update();
+                };
+            } catch (error) {
+                console.error('マイクのアクセスに失敗しました:', error);
+            }
+        }
+
+        startAudioProcessing();
+    </script>
+</body>
+</html>
